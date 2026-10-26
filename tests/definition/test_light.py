@@ -1,8 +1,15 @@
 """Tests for light definition."""
 
+from collections.abc import Callable
+from unittest.mock import patch
+
+from tuya_sharing import CustomerDevice
+
 from tests import create_device
+from tuya_device_handlers import TUYA_QUIRKS_REGISTRY
 from tuya_device_handlers.definition.light import (
     FallbackColorDataMode,
+    LightDefinition,
     get_default_definition,
 )
 from tuya_device_handlers.device_wrapper.common import (
@@ -44,6 +51,93 @@ def test_get_default_definition() -> None:
     assert isinstance(definition.color_mode_wrapper, DPCodeEnumWrapper)
     assert not definition.color_temp_wrapper
     assert isinstance(definition.switch_wrapper, DPCodeBooleanWrapper)
+
+
+class _Quirk:
+    """Minimal quirk that only carries a light definition function."""
+
+    def __init__(
+        self,
+        definition_fn: Callable[[CustomerDevice, str], LightDefinition | None],
+    ) -> None:
+        """Init quirk."""
+        self.definition_fn = definition_fn
+
+    def get_feeder_schedules_wrapper(self, device: CustomerDevice) -> None:
+        """Return no feeder schedules wrapper."""
+        return
+
+    def get_type_information_cls(self, *, dpcode: str) -> None:
+        """Return no type information class override."""
+        return
+
+
+def test_quirk_definition_overrides_default() -> None:
+    """A device quirk's light definition replaces the default definition."""
+    device = create_device("dj_mki13ie507rlry4r.json")
+
+    def quirk_definition(
+        _device: CustomerDevice,
+        switch_dpcode: str,
+    ) -> LightDefinition | None:
+        if switch_dpcode != "switch_led":
+            return None
+        switch_wrapper = DPCodeBooleanWrapper.find_dpcode(
+            _device, "switch_led", prefer_function=True
+        )
+        if switch_wrapper is None:
+            return None
+        return LightDefinition(
+            brightness_wrapper=None,
+            color_data_wrapper=None,
+            color_mode_wrapper=None,
+            color_temp_wrapper=None,
+            switch_wrapper=switch_wrapper,
+        )
+
+    with patch.dict(
+        TUYA_QUIRKS_REGISTRY._quirks,
+        {"mki13ie507rlry4r": _Quirk(quirk_definition)},
+    ):
+        definition = get_default_definition(
+            device,
+            switch_dpcode="switch_led",
+            brightness_dpcode=("bright_value_v2", "bright_value"),
+            brightness_max_dpcode=None,
+            brightness_min_dpcode=None,
+            color_data_dpcode=("colour_data_v2", "colour_data"),
+            color_mode_dpcode="work_mode",
+            color_temp_dpcode=("temp_value_v2", "temp_value"),
+            fallback_color_data_mode=FallbackColorDataMode.V1,
+        )
+    assert definition is not None
+    # The quirk's definition skips the work_mode wrapper the default
+    # definition would have resolved.
+    assert definition.color_mode_wrapper is None
+    assert isinstance(definition.switch_wrapper, DPCodeBooleanWrapper)
+
+
+def test_quirk_definition_declining_falls_back_to_default() -> None:
+    """The default definition applies when the quirk declines a dpcode."""
+    device = create_device("dj_mki13ie507rlry4r.json")
+
+    with patch.dict(
+        TUYA_QUIRKS_REGISTRY._quirks,
+        {"mki13ie507rlry4r": _Quirk(lambda _device, _dpcode: None)},
+    ):
+        definition = get_default_definition(
+            device,
+            switch_dpcode="switch_led",
+            brightness_dpcode=("bright_value_v2", "bright_value"),
+            brightness_max_dpcode=None,
+            brightness_min_dpcode=None,
+            color_data_dpcode=("colour_data_v2", "colour_data"),
+            color_mode_dpcode="work_mode",
+            color_temp_dpcode=("temp_value_v2", "temp_value"),
+            fallback_color_data_mode=FallbackColorDataMode.V1,
+        )
+    assert definition is not None
+    assert isinstance(definition.color_mode_wrapper, DPCodeEnumWrapper)
 
 
 def test_get_default_definition_fails() -> None:
@@ -138,8 +232,10 @@ def test_get_default_definition_without_colour_data() -> None:
 def test_json_colour_data_without_ranges() -> None:
     """Test JSON colour_data without ranges falls back to the V1 ranges."""
     device = create_device("bzyd_45idzfufidgee7ir.json")
-    assert (
-        definition := get_default_definition(
+    # This product has a built-in quirk, so clear the registry to test the
+    # default definition rather than the quirk's override.
+    with patch.dict(TUYA_QUIRKS_REGISTRY._quirks, clear=True):
+        definition = get_default_definition(
             device,
             switch_dpcode="switch_led",
             brightness_dpcode=None,
@@ -150,7 +246,7 @@ def test_json_colour_data_without_ranges() -> None:
             color_temp_dpcode=None,
             fallback_color_data_mode=FallbackColorDataMode.V1,
         )
-    )
+    assert definition is not None
     assert isinstance(definition.color_data_wrapper, ColorDataJsonWrapper)
     # Empty type data and no brightness DP: keep the V1 (default) ranges
     assert definition.color_data_wrapper.h_type is DEFAULT_H_TYPE
@@ -184,8 +280,10 @@ def test_json_colour_data_without_ranges_v2() -> None:
 def test_json_colour_data_without_ranges_fallback_v2() -> None:
     """Test JSON colour_data without ranges honours the V2 fallback mode."""
     device = create_device("bzyd_45idzfufidgee7ir.json")
-    assert (
-        definition := get_default_definition(
+    # This product has a built-in quirk, so clear the registry to test the
+    # default definition rather than the quirk's override.
+    with patch.dict(TUYA_QUIRKS_REGISTRY._quirks, clear=True):
+        definition = get_default_definition(
             device,
             switch_dpcode="switch_led",
             brightness_dpcode=None,
@@ -196,7 +294,7 @@ def test_json_colour_data_without_ranges_fallback_v2() -> None:
             color_temp_dpcode=None,
             fallback_color_data_mode=FallbackColorDataMode.V2,
         )
-    )
+    assert definition is not None
     assert isinstance(definition.color_data_wrapper, ColorDataJsonWrapper)
     assert definition.color_data_wrapper.h_type is DEFAULT_H_TYPE_V2
     assert definition.color_data_wrapper.s_type is DEFAULT_S_TYPE_V2

@@ -8,13 +8,14 @@ import threading
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     import pathlib
 
     from tuya_sharing import CustomerDevice, DeviceFunction, DeviceStatusRange
 
     # We don't want to accidentally create a circular import, so we import
     # these here for type checking only
+    from .definition.light import LightDefinition
     from .device_wrapper.base import DeviceWrapper
     from .device_wrapper.service_feeder_schedule import FeederSchedule
     from .type_information import TypeInformation
@@ -33,6 +34,14 @@ class DeviceQuirkProtocol(Protocol):
     manufacturer: str | None
     model: str | None
     model_id: str | None
+
+    # Optional light definition override, used by
+    # definition.light.get_default_definition before its default logic.
+    # The str argument is the requested switch dpcode, so a quirk can
+    # decline to override unrelated light channels.
+    definition_fn: (
+        Callable[[CustomerDevice, str], LightDefinition | None] | None
+    )
 
     @property
     def quirk_file(self) -> pathlib.Path:

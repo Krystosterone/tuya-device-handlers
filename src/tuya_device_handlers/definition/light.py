@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from tuya_sharing import CustomerDevice
 
+from tuya_device_handlers import TUYA_QUIRKS_REGISTRY
 from tuya_device_handlers.device_wrapper import DeviceWrapper
 from tuya_device_handlers.device_wrapper.common import (
     DPCodeBooleanWrapper,
@@ -45,7 +46,7 @@ class LightQuirk(BaseEntityQuirk):
     """Quirk for a light entity."""
 
     definition_fn: Callable[
-        [CustomerDevice],
+        [CustomerDevice, str],
         LightDefinition | None,
     ]
 
@@ -57,6 +58,17 @@ class FallbackColorDataMode(StrEnum):
     """hue: 0-360, saturation: 0-255, value: 0-255"""
     V2 = "v2"
     """hue: 0-360, saturation: 0-1000, value: 0-1000"""
+
+
+def _get_quirk_light_definition(
+    device: CustomerDevice,
+    switch_dpcode: str,
+) -> LightDefinition | None:
+    """Get the light definition provided by the device's quirk, if any."""
+    quirk = TUYA_QUIRKS_REGISTRY.get_quirk_for_device(device)
+    if quirk is None or quirk.definition_fn is None:
+        return None
+    return quirk.definition_fn(device, switch_dpcode)
 
 
 def get_default_definition(
@@ -72,6 +84,8 @@ def get_default_definition(
     fallback_color_data_mode: FallbackColorDataMode = FallbackColorDataMode.V1,
 ) -> LightDefinition | None:
     """Get the default light definition for a device."""
+    if quirk_definition := _get_quirk_light_definition(device, switch_dpcode):
+        return quirk_definition
     if not (
         switch_wrapper := DPCodeBooleanWrapper.find_dpcode(
             device, switch_dpcode, prefer_function=True

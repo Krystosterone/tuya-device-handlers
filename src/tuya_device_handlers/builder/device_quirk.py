@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from tuya_sharing import CustomerDevice, DeviceFunction, DeviceStatusRange
 
 from tuya_device_handlers.const import DPMode, DPType
+from tuya_device_handlers.definition.light import LightDefinition
 from tuya_device_handlers.device_wrapper.base import DeviceWrapper
 from tuya_device_handlers.device_wrapper.service_feeder_schedule import (
     FeederSchedule,
@@ -207,6 +208,9 @@ class DeviceQuirk(DeviceQuirkProtocol):
         self._quirk_entries = []
         self._type_information_overrides = {}
         self._get_wrapper_functions = {}
+        self.definition_fn: (
+            Callable[[CustomerDevice, str], LightDefinition | None] | None
+        ) = None
 
         current_frame = inspect.currentframe()
         if TYPE_CHECKING:
@@ -465,6 +469,14 @@ class DeviceQuirk(DeviceQuirkProtocol):
     ) -> Self:
         """Map feeder schedule service."""
         self._get_wrapper_functions["feeder_schedules"] = wrapper_function
+        return self
+
+    def map_light_definition(
+        self,
+        definition_fn: Callable[[CustomerDevice, str], LightDefinition | None],
+    ) -> Self:
+        """Set the light definition function for this quirk."""
+        self.definition_fn = definition_fn
         return self
 
     def get_feeder_schedules_wrapper(
